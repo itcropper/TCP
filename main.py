@@ -26,8 +26,9 @@ class ServerConnection:
         #print ("SERVER BUFFER:" + message)
 
         
-        print ("Server recieving message: \n'" + message + "'\n")
+        #print ("Server recieving message: \n'" + message + "'\n")
         #self.socket.close()
+        pass
 
             
 class Client:
@@ -52,7 +53,7 @@ class Client:
         #self.socket.recv(self.handle_recv)
         
     def handle_recv(self, socket, message):
-        print ("Back at client" + message)
+        #print ("Back at client" + message)
         pass
         
 

@@ -64,7 +64,7 @@ class Link:
         if self.queue_threshHold > self.queue.qsize() or self.unlimited:
             if self.queue.empty() and self.link_is_not_busy:
                 self.link_is_not_busy = False
-                self.sked.add(t , pack, self.transmission_handler)
+                self.sked.add(t , None, self.transmission_handler)
             self.queue.put(pack)            
         
     def transmission_handler(self, t, pack):
@@ -101,17 +101,18 @@ class Link:
         if will_drop_packet > -1:
             #schedule to calculate propogation delay with the packet just popped.
             self.sked.add(newTime, packet, self.propagation_handler)
+            self.link_is_not_busy = True
         
         #check of queue is empty
         if self.queue.qsize() > 0:
             
             #if not, then add an event to the scheduler for the transmission delay.
             self.sked.add(newTime, packet,self.transmission_handler)
+            self.link_is_not_busy = True
             
         
     def propagation_handler(self, t, packet):
         
-        self.link_is_not_busy = True
         
         #calculate propgation Delay (m/s)
         

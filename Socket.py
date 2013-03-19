@@ -25,7 +25,7 @@ class host:
 sockets = {}
 
 __SYN_SENT__ = "SYN_SENT"
-__SYN_RCVD__ = "SYN-RECEIVED"
+__SYN_RCVD__ = "SYN_RCVD"
 __ESTABLISHED__ = "ESTABLISHED"
 __FIN_WAIT_1__ = "FIN_WAIT_1"
 __FIN_WAIT_2__ = "FIN_WAIT_2"
@@ -54,7 +54,7 @@ class Socket:
         self.sched = None
         self.window_size = 20
         self.cache = {}
-        self.time_out = .01
+        self.time_out = .1
         self.STATE = __CLOSED__
         self.waiting_to_hear_about = {}
 
@@ -79,6 +79,8 @@ class Socket:
         print ("LISTEN <- SYN")
 
         #put SYN packet on the link
+        packet.set_key("SYN")
+        self.cache[packet.key] = packet
         self.sched.add(self.current_time(), packet, self.send_data)
         #print "sent: " + str(packet.fla)
         
@@ -120,9 +122,10 @@ class Socket:
                 top_data = pack.seq_number + pack.length
                 print ("-> data " + str(pack.seq_number) + " - " + str(top_data))
 
+
                 self.packet_number = top_data
 
-                self.cache[pack.seq_number + pack.length] = pack
+                self.cache[pack.seq_number + pack.length] = pack, self.current_time()
 
                 self.sched.add(self.current_time(), pack, self.send_data)
 
@@ -130,7 +133,7 @@ class Socket:
     def send_data(self, time, packet):
         #print ("TIME: " + str(time))
         packet.sent_at = time
-        self.__clocker(time, packet, self.host.link.enqueue)
+        self.__clocker(time, packet)
         #s = raw_input("State = " + self.STATE)
 
 
@@ -151,17 +154,18 @@ class Socket:
     def store(self, time, packet):
 
         #print ("TYPE:" + self.type, "FLAG:" + str(packet.flag), "STATE: " + self.STATE + "\n")
-        print ("\n")
+        #print ("\n")
         if packet.body:
             self.buffer = packet.body
+            print (self.buffer)
 
         if self.type == "SERVER":
 
             #Client sent out ACK, now server is fully connected
             if packet.flag == "ACK" and self.STATE == __SYN_RCVD__:
 
-                print("ACK-RCVD")
-                print("SERVER CONNECTED...")
+                print ("ACK-RCVD")
+                print (__SYN_RCVD__, "->", __ESTABLISHED__)
                 self.STATE = __ESTABLISHED__
                 a = self
                 self.accept_handler(self.current_time(), a)
@@ -171,16 +175,18 @@ class Socket:
                 pack.flag = "ACK"
 
                 self.STATE == __CLOSE_WAIT__
+                self.cache[pack.key] = pack
                 self.sched.add(self.current_time(), pack, self.send_data)
 
             elif packet.flag == "ACK" and self.STATE == __LAST_ACK__:
                 self.STATE == __CLOSED__
-                print (__LAST_ACK__, "->", __CLOSED__, "\n")
+                print (__LAST_ACK__, "->", __CLOSED__)
                 return
 
 
-            elif packet.flag == None:
-                if self.packet_number  == packet.seq_number or True:
+            elif packet.flag == None and self.STATE == __ESTABLISHED__:
+                #s = raw_input(str(packet.seq_number) + " : " + str(self.packet_number))
+                if self.packet_number  == packet.seq_number:
                     #print (self.packet_number, packet.seq_number, packet.length)
                     #s = raw_input("self.packet_number  == packet.seq_number")
                     pack = Packet(None, self.remote)
@@ -188,6 +194,7 @@ class Socket:
                     #print (packet.seq_number)
                     pack.server_ack = packet.seq_number + packet.length
                     self.packet_number = pack.server_ack
+                    self.cache[pack.key] = pack
                     #print ("Packet Number: " + str(self.packet_number))
                     print ("<- ack " + str(pack.server_ack))
                     self.sched.add(self.current_time(), self.buffer, self.recv_handler)
@@ -199,7 +206,8 @@ class Socket:
                     pack = Packet(None, self.remote)
                     pack.flag = "ACK"
                     #print (packet.seq_number)
-                    pack.server_ack = self.packet_number + pack.length
+                    self.cache[pack.key] = pack
+                    pack.server_ack = self.packet_number
                     self.packet_number = pack.server_ack
                     print ("<- ack " + str(pack.server_ack))
                     self.sched.add(self.current_time(), self.buffer, self.recv_handler)
@@ -208,12 +216,18 @@ class Socket:
             elif packet.flag == "FIN" and self.STATE == __ESTABLISHED__:
                 pack1 = Packet(None, self.remote)
                 pack1.flag = "ACK"
-                self.STATE == __CLOSE_WAIT__
+                self.STATE = __CLOSE_WAIT__
                 print (__ESTABLISHED__, "->", __CLOSE_WAIT__)
+                pack1.set_key("ACK")
+
+                self.cache[pack1.key] = pack1
+
                 self.sched.add(self.current_time(), pack1, self.send_data)
                 pack2 = Packet(None, self.remote)
                 pack2.flag = "FIN"
                 self.STATE = __LAST_ACK__
+                pack2.set_key("FIN")
+                self.cache[pack2.key] = pack2
                 print (__CLOSE_WAIT__, "->", __LAST_ACK__)
                 self.sched.add(self.current_time(), pack2, self.send_data)
 
@@ -223,7 +237,13 @@ class Socket:
 
                 pack = Packet(None, self.remote)
                 pack.flag = "SYNACK"
-                print("SYN-RCVD -> SYN+ACK")
+                print ("SYN-RCVD -> SYN+ACK")
+
+                pack.set_key('SYNACK')
+
+                self.cache[pack.key] = pack
+
+                
                 self.sched.add(self.current_time(), pack, self.send_data)
                 '''
                 pass
@@ -232,46 +252,54 @@ class Socket:
         #Must be a client
         else:
             if packet.flag == "ACK" and self.STATE == "ESTABLISHED":
-                print ("CLIENT RECVD ", packet.server_ack, "\n")
+                print ("CLIENT RECVD ", packet.server_ack)
 
+                #print self.cache[packet.server_ack][1] , self.current_time()
+                if (
+                    packet.server_ack in self.cache.keys() and
+                    packet.server_ack != self.cache[packet.server_ack].seq_number + self.cache[packet.server_ack].length
+                    ):
+                    print (self.cache.keys())
+                    print (packet.server_ack,  self.cache[packet.server_ack].seq_number)
 
-                if False:
                     seq = self.cache[packet.server_ack].seq_number
                     length = self.cache[packet.server_ack].length
                     print ("-> retransmit  " +
                             str(seq) 
                             + " - " + 
                             str(seq + length))
-
+                    self.cache[packet.server_ack] = (self.cache[packet.server_ack], self.current_time() + self.time_out)
                     self.sched.add(self.current_time(), self.cache[packet.server_ack], self.send_data)
                     
-                    #print ("Packets still to be sent")
-                    #for p in self.cache.keys():
-                    #    print (self.cache[p].body)
-                elif False:
-                    #store in a cache somehow
-                    print ("SHOULDN'T GET HERE YET")
-                    pass
+                #start over cause it missed the first data    
+                elif packet.server_ack not in self.cache.keys():
+                    for pack in self.cache:
+                        self.cache[pack.key] = pack
+                        self.sched.add(self.current_time(), self.cache[pack], self.send_data)
+
                 else:
-                    print "finishing early?"
+                    #print "finishing early?"
                     self.sched.add(self.current_time(),self.buffer, self.recv_handler )
                     del self.cache[packet.server_ack] 
 
                     if len(self.cache) == 0:
-                        print (__ESTABLISHED__, " ->",__FIN_WAIT_1__, "\n")
+                        print (__ESTABLISHED__, " ->",__FIN_WAIT_1__)
                         pack = Packet(None, self.remote)
                         pack.flag = "FIN"
                         self.STATE = __FIN_WAIT_1__
+                        self.cache[pack.key] = pack
                         self.sched.add(self.current_time(), pack, self.send_data)
                         
 
 
                     #Client recieved SYNACK from server, now client is fully connected
             elif packet.flag == "ACK" and self.STATE == "FIN_WAIT_1":
-                print (__FIN_WAIT_1__, " ->", __FIN_WAIT_2__, "\n")
+                print (__FIN_WAIT_1__, " ->", __FIN_WAIT_2__)
                 self.STATE = __FIN_WAIT_2__
                 pack = Packet(None, self.remote)
+                pack.set_key("ACK")
                 pack.flag = "ACK"
+                self.cache[pack.key] = pack
                 self.sched.add(self.current_time(), pack, self.send_data)
 
 
@@ -281,35 +309,57 @@ class Socket:
                 self.STATE = __ESTABLISHED__
                 pack = Packet(None, self.remote)
                 pack.flag = "ACK"
-                print("SYN+ACK-RCVD <- ACK")
+                print ("SYN+ACK-RCVD <- ACK")
+                print (__SYN_SENT__, "->", __ESTABLISHED__)
                 #print ("CLIENT CONNECTED...")
                 self.STATE = __ESTABLISHED__
+                pack.set_key("ACK")
+                self.cache[pack.key] = pack
                 self.sched.add(self.current_time(), pack, self.send_data)
                 self.connect_handler()
             
             elif packet.flag == "FIN" and self.STATE == __FIN_WAIT_2__:
                 pack = Packet("FINISHED", self.remote)
-                pack.flag = None
+                pack.flag = "ACK"
+                pack.set_key("ACK")
+                self.cache[pack.key] = pack
                 self.STATE = __TIME_WAIT__
+                self.sched.add(self.current_time(), pack, self.send_data)
                 self.sched.add(self.current_time(), (0, pack), self.time_wait)
+
+                '''
+                and packet.sent_at + self.time_out <= self.current_time()
+                '''
 
     def time_wait(self, time, data):
         if data[0] == 1:
             self.STATE = __CLOSED__
-            print (__TIME_WAIT__, "->", __CLOSED__, "\n")
+            print (__TIME_WAIT__, "->", __CLOSED__)
             self.close()
         else:
             data = (data[0] + 1, data[1])
             self.sched.add(self.current_time(), data, self.time_wait)
 
 
-    def __clocker(self, time, packet, function):
+    def __clocker(self, time, packet):
 
-
+        print (self.cache.keys())
         
-        #self.sched.add(time + self.time_out, packet, __clocker)
+        print (packet.key, time, self.current_time(), packet.sent_at, packet.sent_at + self.time_out)
+        if packet.key in self.cache.keys() and packet.sent_at + self.time_out <= self.current_time():
+            self.sched.add(time, packet, self.host.link.enqueue)
+            self.sched.add(time + self.time_out, packet, self.__clocker)
+        else:
+            seq = self.cache[packet.key].seq_number
+            length = self.cache[packet.key].length
+            print ("-> retransmit  " +
+                    str(seq) 
+                    + " - " + 
+                    str(seq + length))
 
-        self.sched.add(time, packet, function)
+            self.cache[packet.key].sent_at = time
+            self.sched.add(self.current_time(), self.cache[packet.key], self.send_data)
+        
 
     def current_time(self):
         return self.sched.current_time()
